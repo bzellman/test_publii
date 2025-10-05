@@ -2,104 +2,110 @@
                background-image: url(./assets/images/overlay.png), linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1)), url(./media/website/Calm-Legacy-Family-Growth.jpg);
            }</style><noscript><style>img[loading] {
                     opacity: 1;
-                }</style></noscript><script>/**
- * Homepage-only loader:
- * On the homepage, fetch the FIRST #nav link's page and inject its #main.
- * On all other pages, do nothing.
+                }</style></noscript></head><body class="is-preload page-template"><script>/**
+ * On clicking the "Continue" scrolly button:
+ *  - Let it scroll to #header as usual
+ *  - When #header is in view (or after a short fallback delay), fetch the FIRST #nav link
+ *    and inject its main content into the current #main (no navigation).
+ * Works on GitHub Pages / any http(s) same-origin deploy.
  */
 (function () {
-  // Run only after the theme initializes
-  window.addEventListener('load', function () {
-    // ------ GUARD: only on homepage ------
-    var isHome =
-      document.body.classList.contains('home-template') ||
-      /(?:^|\/)index\.html?$/.test(location.pathname.replace(/\/+$/, ''));
+  var continueBtn = document.querySelector('a.scrolly[href="#header"], a[href="#header"].scrolly');
+  var didLoad = false;
 
-    if (!isHome) return;
+  if (!continueBtn) return;
 
-    var firstLink = document.querySelector('#nav .links a');
-    var hostMain  = document.querySelector('#main');
-    if (!firstLink || !hostMain) return;
+  continueBtn.addEventListener('click', function () {
+    if (didLoad) return; // one-shot
 
-    // Resolve first link URL
-    var url;
-    try { url = new URL(firstLink.getAttribute('href') || '', location.href); }
-    catch (_) { return; }
+    function loadFirstNavPage() {
+      if (didLoad) return; didLoad = true;
 
-    // Only fetch http(s) same-origin, and only if it's not already this page
-    if (!/^https?:$/.test(url.protocol)) return;
-    if (url.origin !== location.origin) return;
-    if (url.pathname === location.pathname && url.search === location.search) return;
+      var firstLink = document.querySelector('#nav .links a');
+      var hostMain  = document.querySelector('#main');
+      if (!firstLink || !hostMain) return;
 
-    // Cosmetic: mark as active (optional)
-    try { firstLink.classList.add('active', 'is-active'); } catch(_) {}
+      var url;
+      try { url = new URL(firstLink.getAttribute('href') || '', location.href); }
+      catch (_) { return; }
 
-    // Helpers
-    function absolutizeUrls(rootEl, base) {
-      rootEl.querySelectorAll('[src],[href]').forEach(function (el) {
-        var attr = el.hasAttribute('src') ? 'src' : (el.hasAttribute('href') ? 'href' : null);
-        if (!attr) return;
-        var val = el.getAttribute(attr);
-        if (!val || val.startsWith('#') || val.startsWith('mailto:') || val.startsWith('tel:')) return;
-        try { el.setAttribute(attr, new URL(val, base).href); } catch(_) {}
-      });
-    }
-    function extractMain(doc) {
-      return (
-        doc.querySelector('#main') ||
-        doc.querySelector('main') ||
-        doc.querySelector('.post, .page, .content, .page-content, article') ||
-        doc.body
-      );
-    }
-    function keepTop() { if (window.scrollY !== 0) window.scrollTo(0, 0); }
+      // only fetch http(s) same-origin; skip if it's an in-page hash
+      if (!/^https?:$/.test(url.protocol)) return;
+      if (url.origin !== location.origin) return;
+      if (url.hash) return;
 
-    // Keep viewport at top; disable jumpy smooth scroll just for this operation
-    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-    var htmlEl = document.documentElement;
-    var prevScrollBehavior = htmlEl.style.scrollBehavior;
-    htmlEl.style.scrollBehavior = 'auto';
-    keepTop();
+      // optional: visually mark active
+      try { firstLink.classList.add('active','is-active'); } catch(_) {}
 
-    fetch(url.href, { credentials: 'same-origin' })
-      .then(function (res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.text(); })
-      .then(function (html) {
-        var doc = new DOMParser().parseFromString(html, 'text/html');
-        var foreignMain = extractMain(doc);
-        if (!foreignMain) return;
-
-        var frag = foreignMain.cloneNode(true);
-
-        // Normalize lazy assets
-        frag.querySelectorAll('img, source').forEach(function (el) {
-          if (el.tagName === 'IMG' && el.hasAttribute('loading')) el.setAttribute('loading', 'eager');
-          if (el.dataset && el.dataset.src && !el.getAttribute('src')) el.setAttribute('src', el.dataset.src);
-          if (el.dataset && el.dataset.srcset && !el.getAttribute('srcset')) el.setAttribute('srcset', el.dataset.srcset);
-          el.classList.add('is-loaded');
+      function absolutizeUrls(rootEl, base) {
+        rootEl.querySelectorAll('[src],[href]').forEach(function (el) {
+          var attr = el.hasAttribute('src') ? 'src' : (el.hasAttribute('href') ? 'href' : null);
+          if (!attr) return;
+          var val = el.getAttribute(attr);
+          if (!val || val.startsWith('#') || val.startsWith('mailto:') || val.startsWith('tel:')) return;
+          try { el.setAttribute(attr, new URL(val, base).href); } catch(_) {}
         });
+      }
 
-        // Fix relative URLs inside injected content
-        absolutizeUrls(frag, url.href);
+      function extractMain(doc) {
+        return (
+          doc.querySelector('#main') ||
+          doc.querySelector('main') ||
+          doc.querySelector('.post, .page, .content, .page-content, article') ||
+          doc.body
+        );
+      }
 
-        // Inject
-        hostMain.innerHTML = '';
-        hostMain.appendChild(frag);
-        hostMain.classList.remove('inactive', 'is-inactive', 'hidden');
-        hostMain.setAttribute('aria-hidden', 'false');
+      fetch(url.href, { credentials: 'same-origin' })
+        .then(function (res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.text(); })
+        .then(function (html) {
+          var doc = new DOMParser().parseFromString(html, 'text/html');
+          var foreignMain = extractMain(doc);
+          if (!foreignMain) return;
 
-        // Reaffirm top (in case any plugin tried to scroll)
-        setTimeout(keepTop, 0);
-        setTimeout(keepTop, 50);
-        setTimeout(keepTop, 200);
-      })
-      .catch(function (err) {
-        console.warn('[home-first-nav-loader] failed:', err);
-      })
-      .finally(function () {
-        htmlEl.style.scrollBehavior = prevScrollBehavior || '';
-      });
+          var frag = foreignMain.cloneNode(true);
+
+          // normalize lazy assets so they render
+          frag.querySelectorAll('img, source').forEach(function (el) {
+            if (el.tagName === 'IMG' && el.hasAttribute('loading')) el.setAttribute('loading', 'eager');
+            if (el.dataset && el.dataset.src && !el.getAttribute('src')) el.setAttribute('src', el.dataset.src);
+            if (el.dataset && el.dataset.srcset && !el.getAttribute('srcset')) el.setAttribute('srcset', el.dataset.srcset);
+            el.classList.add('is-loaded');
+          });
+
+          absolutizeUrls(frag, url.href);
+
+          // inject (do NOT change scroll position)
+          hostMain.innerHTML = '';
+          hostMain.appendChild(frag);
+          hostMain.classList.remove('inactive','is-inactive','hidden');
+          hostMain.setAttribute('aria-hidden', 'false');
+        })
+        .catch(function (err) { console.warn('[first-nav-on-continue] failed:', err); });
+    }
+
+    // Prefer: trigger when #header is actually in view
+    var header = document.getElementById('header');
+
+    if ('IntersectionObserver' in window && header) {
+      var obs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            obs.disconnect();
+            loadFirstNavPage();
+          }
+        });
+      }, { root: null, threshold: 0.35 }); // ~35% visible
+      obs.observe(header);
+
+      // Fallback in case theme scroll takes long / IO never fires
+      setTimeout(function(){ if (!didLoad) loadFirstNavPage(); }, 1500);
+    } else {
+      // No IO support: fallback to a simple delay after click
+      setTimeout(loadFirstNavPage, 800);
+    }
   }, { once: true });
-})();</script></head><body class="is-preload page-template"><div id="wrapper"><header id="header"><a class="logo" href="./">Zibby.ai</a></header><nav id="nav"><ul class="links"><li><a href="./new-page.html" target="_self">Smart Curation</a></li><li><a href="./interactive-discovery.html" target="_self">Legacy Discovery</a></li><li><a href="./were-the-sum-of-our-stories-2.html" target="_self">We&#x27;re Our Stories</a></li><li><a href="./our-circle-of-trust.html" target="_self">Circle of Trust</a></li><li class="active"><a href="./sign-up.html" target="_self">Sign-Up</a></li><li><a href="./smart-storytelling.html" target="_self">Storytelling</a></li></ul></nav><main id="main"><article class="post"><header class="major"><h1>Sign-Up</h1><p class="post__inner"></p></header><div class="post__inner post__entry"><form id="signup-form"><div style="display: flex; gap: 1rem; flex-wrap: wrap;"><div style="flex: 1;"><label for="name">Name:</label><br><input type="text" required="" style="width: 100%;"></div><div style="flex: 1;"><label for="email">Email:</label><br><input type="email" id="email" name="email" required="" style="width: 100%;"></div></div><br><fieldset><legend>Preferences:</legend><label><input type="checkbox" name="preferences" value="notify_launch" checked="checked"> Email me with a sign-up link when you launch</label><br><label><input type="checkbox" name="preferences" value="learn_more"> I'm interested in learning more</label></fieldset><br><button type="submit">Submit</button></form><p id="form-message" style="color: green; font-weight: bold;"></p><script>// 👇 Set your endpoint here
+})();</script><div id="wrapper"><header id="header"><a class="logo" href="./">Zibby.ai</a></header><nav id="nav"><ul class="links"><li><a href="./new-page.html" target="_self">Smart Curation</a></li><li><a href="./interactive-discovery.html" target="_self">Legacy Discovery</a></li><li><a href="./were-the-sum-of-our-stories-2.html" target="_self">We&#x27;re Our Stories</a></li><li><a href="./our-circle-of-trust.html" target="_self">Circle of Trust</a></li><li class="active"><a href="./sign-up.html" target="_self">Sign-Up</a></li><li><a href="./smart-storytelling.html" target="_self">Storytelling</a></li></ul></nav><main id="main"><article class="post"><header class="major"><h1>Sign-Up</h1><p class="post__inner"></p></header><div class="post__inner post__entry"><form id="signup-form"><div style="display: flex; gap: 1rem; flex-wrap: wrap;"><div style="flex: 1;"><label for="name">Name:</label><br><input type="text" required="" style="width: 100%;"></div><div style="flex: 1;"><label for="email">Email:</label><br><input type="email" id="email" name="email" required="" style="width: 100%;"></div></div><br><fieldset><legend>Preferences:</legend><label><input type="checkbox" name="preferences" value="notify_launch" checked="checked"> Email me with a sign-up link when you launch</label><br><label><input type="checkbox" name="preferences" value="learn_more"> I'm interested in learning more</label></fieldset><br><button type="submit">Submit</button></form><p id="form-message" style="color: green; font-weight: bold;"></p><script>// 👇 Set your endpoint here
 	const API_ENDPOINT = "https://your-endpoint-here.com/submit";
 
 	document.getElementById("signup-form").addEventListener("submit", async function(e) {
