@@ -2,119 +2,104 @@
                background-image: url(./assets/images/overlay.png), linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1)), url(./media/website/Calm-Legacy-Family-Growth.jpg);
            }</style><noscript><style>img[loading] {
                     opacity: 1;
-                }</style></noscript></head><body class="is-preload page-template"><script>/**
- * Load the first #nav link's content into the current page's #main
- * without scrolling. Works when served over http(s).
- * Note: Most browsers block fetch(file://...). Test on a local server or deployed site.
+                }</style></noscript><script>/**
+ * Homepage-only loader:
+ * On the homepage, fetch the FIRST #nav link's page and inject its #main.
+ * On all other pages, do nothing.
  */
 (function () {
-  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-
-  function atTop() {
-    if (window.scrollY !== 0) window.scrollTo(0, 0);
-  }
-
-  function absolutizeUrls(rootEl, base) {
-    // Rewrite relative URLs inside the injected fragment so assets work
-    rootEl.querySelectorAll('[src], [href]').forEach(function (el) {
-      var attr = el.hasAttribute('src') ? 'src' :
-                 (el.hasAttribute('href') ? 'href' : null);
-      if (!attr) return;
-      var val = el.getAttribute(attr);
-      if (!val || val.startsWith('#') || val.startsWith('mailto:') || val.startsWith('tel:')) return;
-      try {
-        // new URL resolves relative paths against base
-        var abs = new URL(val, base).href;
-        el.setAttribute(attr, abs);
-      } catch (_) {}
-    });
-  }
-
-  function extractMain(doc) {
-    return (
-      doc.querySelector('#main') ||
-      doc.querySelector('main') ||
-      doc.querySelector('.post, .page, .content, .page-content, article') ||
-      doc.body
-    );
-  }
-
+  // Run only after the theme initializes
   window.addEventListener('load', function () {
-    atTop();
+    // ------ GUARD: only on homepage ------
+    var isHome =
+      document.body.classList.contains('home-template') ||
+      /(?:^|\/)index\.html?$/.test(location.pathname.replace(/\/+$/, ''));
+
+    if (!isHome) return;
 
     var firstLink = document.querySelector('#nav .links a');
     var hostMain  = document.querySelector('#main');
-
     if (!firstLink || !hostMain) return;
 
-    // Make it visually "active"
-    try { firstLink.classList.add('active', 'is-active'); } catch (_) {}
-
-    // Resolve URL
-    var href = firstLink.getAttribute('href') || '';
+    // Resolve first link URL
     var url;
-    try { url = new URL(href, location.href); } catch (_) { return; }
+    try { url = new URL(firstLink.getAttribute('href') || '', location.href); }
+    catch (_) { return; }
 
-    // Bail if it's not same-origin http(s) or if there's a hash (hash means in-page)
-    if (!(url.protocol === 'http:' || url.protocol === 'https:')) {
-      // file:// or others — can't fetch safely; nothing else to do
-      return;
-    }
-    if (url.hash) {
-      // If your first link is actually an anchor, you should use the earlier anchor-based script
-      return;
-    }
+    // Only fetch http(s) same-origin, and only if it's not already this page
+    if (!/^https?:$/.test(url.protocol)) return;
+    if (url.origin !== location.origin) return;
+    if (url.pathname === location.pathname && url.search === location.search) return;
 
-    // Fetch the page and inject its main
+    // Cosmetic: mark as active (optional)
+    try { firstLink.classList.add('active', 'is-active'); } catch(_) {}
+
+    // Helpers
+    function absolutizeUrls(rootEl, base) {
+      rootEl.querySelectorAll('[src],[href]').forEach(function (el) {
+        var attr = el.hasAttribute('src') ? 'src' : (el.hasAttribute('href') ? 'href' : null);
+        if (!attr) return;
+        var val = el.getAttribute(attr);
+        if (!val || val.startsWith('#') || val.startsWith('mailto:') || val.startsWith('tel:')) return;
+        try { el.setAttribute(attr, new URL(val, base).href); } catch(_) {}
+      });
+    }
+    function extractMain(doc) {
+      return (
+        doc.querySelector('#main') ||
+        doc.querySelector('main') ||
+        doc.querySelector('.post, .page, .content, .page-content, article') ||
+        doc.body
+      );
+    }
+    function keepTop() { if (window.scrollY !== 0) window.scrollTo(0, 0); }
+
+    // Keep viewport at top; disable jumpy smooth scroll just for this operation
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    var htmlEl = document.documentElement;
+    var prevScrollBehavior = htmlEl.style.scrollBehavior;
+    htmlEl.style.scrollBehavior = 'auto';
+    keepTop();
+
     fetch(url.href, { credentials: 'same-origin' })
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.text();
-      })
+      .then(function (res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.text(); })
       .then(function (html) {
-        // Parse
-        var parser = new DOMParser();
-        var doc = parser.parseFromString(html, 'text/html');
+        var doc = new DOMParser().parseFromString(html, 'text/html');
         var foreignMain = extractMain(doc);
         if (!foreignMain) return;
 
-        // Clone so we can manipulate safely
         var frag = foreignMain.cloneNode(true);
 
-        // Normalize lazy assets so they render
-        frag.querySelectorAll('img').forEach(function (img) {
-          if (img.hasAttribute('loading')) img.setAttribute('loading', 'eager');
-          if (img.dataset && img.dataset.src && !img.getAttribute('src')) {
-            img.setAttribute('src', img.dataset.src);
-          }
-          if (img.dataset && img.dataset.srcset && !img.getAttribute('srcset')) {
-            img.setAttribute('srcset', img.dataset.srcset);
-          }
-          img.classList.add('is-loaded');
+        // Normalize lazy assets
+        frag.querySelectorAll('img, source').forEach(function (el) {
+          if (el.tagName === 'IMG' && el.hasAttribute('loading')) el.setAttribute('loading', 'eager');
+          if (el.dataset && el.dataset.src && !el.getAttribute('src')) el.setAttribute('src', el.dataset.src);
+          if (el.dataset && el.dataset.srcset && !el.getAttribute('srcset')) el.setAttribute('srcset', el.dataset.srcset);
+          el.classList.add('is-loaded');
         });
 
         // Fix relative URLs inside injected content
         absolutizeUrls(frag, url.href);
 
-        // Inject without scrolling
+        // Inject
         hostMain.innerHTML = '';
         hostMain.appendChild(frag);
-
-        // If your theme hides sections until scrolled, un-hide common classes
         hostMain.classList.remove('inactive', 'is-inactive', 'hidden');
         hostMain.setAttribute('aria-hidden', 'false');
 
-        // Keep at top in case a plugin auto-scrolled
-        setTimeout(atTop, 0);
-        setTimeout(atTop, 50);
-        setTimeout(atTop, 200);
+        // Reaffirm top (in case any plugin tried to scroll)
+        setTimeout(keepTop, 0);
+        setTimeout(keepTop, 50);
+        setTimeout(keepTop, 200);
       })
       .catch(function (err) {
-        // Silent fail to avoid breaking the page in production
-        console.warn('[first-nav-loader] failed:', err);
+        console.warn('[home-first-nav-loader] failed:', err);
+      })
+      .finally(function () {
+        htmlEl.style.scrollBehavior = prevScrollBehavior || '';
       });
   }, { once: true });
-})();</script><div id="wrapper"><header id="header"><a class="logo" href="./">Zibby.ai</a></header><nav id="nav"><ul class="links"><li><a href="./new-page.html" target="_self">Smart Curation</a></li><li><a href="./interactive-discovery.html" target="_self">Legacy Discovery</a></li><li><a href="./were-the-sum-of-our-stories-2.html" target="_self">We&#x27;re Our Stories</a></li><li><a href="./our-circle-of-trust.html" target="_self">Circle of Trust</a></li><li class="active"><a href="./sign-up.html" target="_self">Sign-Up</a></li><li><a href="./smart-storytelling.html" target="_self">Storytelling</a></li></ul></nav><main id="main"><article class="post"><header class="major"><h1>Sign-Up</h1><p class="post__inner"></p></header><div class="post__inner post__entry"><form id="signup-form"><div style="display: flex; gap: 1rem; flex-wrap: wrap;"><div style="flex: 1;"><label for="name">Name:</label><br><input type="text" required="" style="width: 100%;"></div><div style="flex: 1;"><label for="email">Email:</label><br><input type="email" id="email" name="email" required="" style="width: 100%;"></div></div><br><fieldset><legend>Preferences:</legend><label><input type="checkbox" name="preferences" value="notify_launch" checked="checked"> Email me with a sign-up link when you launch</label><br><label><input type="checkbox" name="preferences" value="learn_more"> I'm interested in learning more</label></fieldset><br><button type="submit">Submit</button></form><p id="form-message" style="color: green; font-weight: bold;"></p><script>// 👇 Set your endpoint here
+})();</script></head><body class="is-preload page-template"><div id="wrapper"><header id="header"><a class="logo" href="./">Zibby.ai</a></header><nav id="nav"><ul class="links"><li><a href="./new-page.html" target="_self">Smart Curation</a></li><li><a href="./interactive-discovery.html" target="_self">Legacy Discovery</a></li><li><a href="./were-the-sum-of-our-stories-2.html" target="_self">We&#x27;re Our Stories</a></li><li><a href="./our-circle-of-trust.html" target="_self">Circle of Trust</a></li><li class="active"><a href="./sign-up.html" target="_self">Sign-Up</a></li><li><a href="./smart-storytelling.html" target="_self">Storytelling</a></li></ul></nav><main id="main"><article class="post"><header class="major"><h1>Sign-Up</h1><p class="post__inner"></p></header><div class="post__inner post__entry"><form id="signup-form"><div style="display: flex; gap: 1rem; flex-wrap: wrap;"><div style="flex: 1;"><label for="name">Name:</label><br><input type="text" required="" style="width: 100%;"></div><div style="flex: 1;"><label for="email">Email:</label><br><input type="email" id="email" name="email" required="" style="width: 100%;"></div></div><br><fieldset><legend>Preferences:</legend><label><input type="checkbox" name="preferences" value="notify_launch" checked="checked"> Email me with a sign-up link when you launch</label><br><label><input type="checkbox" name="preferences" value="learn_more"> I'm interested in learning more</label></fieldset><br><button type="submit">Submit</button></form><p id="form-message" style="color: green; font-weight: bold;"></p><script>// 👇 Set your endpoint here
 	const API_ENDPOINT = "https://your-endpoint-here.com/submit";
 
 	document.getElementById("signup-form").addEventListener("submit", async function(e) {
